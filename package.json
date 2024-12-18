@@ -1,0 +1,47 @@
+{
+  "name": "shoppinglala",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@apollo/client": "^3.12.2",
+    "@phosphor-icons/react": "^2.1.7",
+    "@shopify/shopify-api": "^11.6.1",
+    "@tailwindcss/aspect-ratio": "^0.4.2",
+    "@tailwindcss/forms": "^0.5.9",
+    "@tailwindcss/typography": "^0.5.15",
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "cross-fetch": "^4.0.0",
+    "date-fns": "^4.1.0",
+    "firebase": "^11.0.2",
+    "graphql": "^16.9.0",
+    "graphql-request": "^7.1.2",
+    "isomorphic-fetch": "^3.0.0",
+    "next": "^15.0.4",
+    "prop-types": "^15.8.1",
+    "razorpay": "^2.9.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hot-toast": "^2.4.1",
+    "react-icons": "^5.4.0",
+    "react-query": "^3.39.3",
+    "shopify-buy": "^2.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/shopify-buy": "^2.17.4",
+    "eslint": "^8",
+    "eslint-config-next": "15.0.4",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}

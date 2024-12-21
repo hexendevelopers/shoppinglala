@@ -4,6 +4,36 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
 
+// Define proper types
+interface CustomerData {
+  name?: string;
+  email?: string;
+  phone?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  zip?: string;
+  country?: string;
+}
+
+interface CartItem {
+  variantId: string | number;
+  quantity: number;
+  title: string;
+  price: string;
+  handle?: string;
+  image?: string;
+  variant?: {
+    id?: number;
+    title?: string;
+    sku?: string;
+    image?: {
+      url?: string;
+    };
+  };
+}
+
 declare global {
   interface Window {
     Razorpay: any;
@@ -14,7 +44,7 @@ const PaymentPage = () => {
   const router = useRouter();
   const [isReady, setIsReady] = useState(false);
   const [amount, setAmount] = useState(0);
-  const [customerData, setCustomerData] = useState<any>(null);
+  const [customerData, setCustomerData] = useState<CustomerData | null>(null);
 
   useEffect(() => {
     try {
@@ -39,10 +69,6 @@ const PaymentPage = () => {
         pinCode: addressDetails.zip,
         contact: addressDetails.phone
       });
-
-      if (typeof window.Razorpay !== 'undefined') {
-        setIsReady(true);
-      }
     } catch (error) {
       console.error('Error initializing payment page:', error);
       alert('Error loading payment information');
@@ -50,105 +76,140 @@ const PaymentPage = () => {
     }
   }, [router]);
 
-  const createShopifyOrder = async (paymentResponse: any) => {
+  const createShopifyOrder = async (paymentResponse: { razorpay_payment_id: string }) => {
     try {
+      // First validate cart items
       const cartItems = localStorage.getItem('cartItems');
-      const userAccessToken = localStorage.getItem('useraccessToken');
-      const cartCost = localStorage.getItem('cartCost');
-      const shippingDetails = localStorage.getItem('shippingDetails');
-      const customerData = localStorage.getItem('customerData');
-      
-      if (!cartItems || !userAccessToken || !cartCost || !shippingDetails || !customerData) {
-        throw new Error('Missing required data for order creation');
+      if (!cartItems) {
+        throw new Error('Cart is empty');
       }
 
-      const parsedCartItems = JSON.parse(cartItems);
-      const parsedShippingDetails = JSON.parse(shippingDetails);
-      const parsedCustomerData = JSON.parse(customerData);
-      const { totalAmount } = JSON.parse(cartCost);
+      // Get customer data first
+      const customerDataStr = localStorage.getItem('customerData');
+      const shippingDetailsStr = localStorage.getItem('shippingDetails');
+      
+      console.log('Raw customer data:', customerDataStr);
+      console.log('Raw shipping details:', shippingDetailsStr);
 
-      const address = {
-        first_name: parsedShippingDetails.firstName,
-        last_name: parsedShippingDetails.lastName,
-        address1: parsedShippingDetails.address1,
-        address2: parsedShippingDetails.address2 || '',
-        city: parsedShippingDetails.city,
-        province: parsedShippingDetails.province,
-        country: parsedShippingDetails.country,
-        zip: parsedShippingDetails.zip,
-        phone: parsedShippingDetails.phone
+      if (!customerDataStr || !shippingDetailsStr) {
+        throw new Error('Missing customer or shipping information');
+      }
+
+      const customerData = JSON.parse(customerDataStr);
+      const shippingDetails = JSON.parse(shippingDetailsStr);
+      
+      // Use email from customerData
+      if (!customerData.email) {
+        throw new Error('Customer email is required');
+      }
+
+      // Combine customer data with shipping details
+      const customerDetails = {
+        firstName: customerData.firstName,
+        lastName: customerData.lastName,
+        email: customerData.email, // Use email from customerData
+        shippingDetails: {
+          address1: shippingDetails.address1,
+          address2: shippingDetails.address2 || '',
+          city: shippingDetails.city,
+          province: shippingDetails.province,
+          zip: shippingDetails.zip,
+          country: shippingDetails.country || 'IN',
+          phone: customerData.phone // Use phone from customerData
+        }
       };
+
+      console.log('Combined customer details:', customerDetails);
+
+      // Process cart items
+      const parsedCartItems = JSON.parse(cartItems);
+      const items = Array.isArray(parsedCartItems) 
+        ? parsedCartItems 
+        : Object.values(parsedCartItems);
+
+      const lineItems = items.map((item: CartItem) => {
+        let variantId: number;
+        if (typeof item.variantId === 'number') {
+          variantId = item.variantId;
+        } else if (typeof item.variantId === 'string') {
+          const cleanId = item.variantId.replace(/^gid:\/\/shopify\/ProductVariant\//, '');
+          variantId = parseInt(cleanId, 10);
+        } else if (item.variant?.id) {
+          variantId = item.variant.id;
+        } else {
+          throw new Error(`Missing variant ID for item: ${item.title}`);
+        }
+
+        if (isNaN(variantId) || variantId === 0) {
+          throw new Error(`Invalid variant ID for item: ${item.title}`);
+        }
+
+        return {
+          variant_id: variantId,
+          quantity: parseInt(item.quantity.toString()),
+          price: item.price,
+          requires_shipping: true,
+          taxable: true,
+          title: item.title
+        };
+      });
 
       const orderData = {
         razorpayPaymentId: paymentResponse.razorpay_payment_id,
-        amount: totalAmount.amount,
-        currency: totalAmount.currencyCode || 'INR',
-        customerDetails: {
-          firstName: parsedShippingDetails.firstName,
-          lastName: parsedShippingDetails.lastName,
-          email: parsedCustomerData.email,
-          phone: parsedShippingDetails.phone,
-          billingAddress: address,
-          shippingAddress: address
-        },
-        lineItems: Object.values(parsedCartItems).map((item: any) => ({
-          variant_id: item.variantId.split('/').pop(),
-          quantity: item.quantity,
-          price: item.price
-        }))
+        amount,
+        customerDetails,
+        lineItems
       };
 
-      console.log('Sending order data:', orderData);
+      console.log('Sending order data:', JSON.stringify(orderData, null, 2));
 
       const response = await fetch('/api/shopify/createOrder', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${userAccessToken}`
         },
-        body: JSON.stringify(orderData)
+        body: JSON.stringify(orderData),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Error creating order');
+      const data = await response.json();
+      console.log('API response:', data);
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to create order');
       }
 
-      const data = await response.json();
-
-      // Clear cart data only after successful order creation
+      // Clear cart after successful order
       localStorage.removeItem('cartItems');
       localStorage.removeItem('cartCost');
 
-      return data;
-    } catch (error: any) {
-      console.error('Detailed error creating Shopify order:', {
-        error: error.message,
-        stack: error.stack,
-        cartData: {
-          rawCartItems: localStorage.getItem('cartItems'),
-          parsedCartItems: localStorage.getItem('cartItems') ? JSON.parse(localStorage.getItem('cartItems')!) : null
-        },
-        paymentResponse
+      return {
+        orderId: data.shopifyOrderId,
+        orderStatus: data.orderStatus
+      };
+    } catch (error) {
+      console.error('Order creation error:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
       });
-      throw new Error(`Failed to create order: ${error.message}`);
+      throw error;
     }
   };
 
   const handlePayment = async () => {
-    try {
-      if (!isReady) {
-        alert('Payment system is initializing. Please try again.');
-        return;
-      }
+    if (!isReady || !customerData) {
+      alert('Payment system is initializing. Please try again.');
+      return;
+    }
 
+    try {
       const cartCost = localStorage.getItem('cartCost');
       if (!cartCost) {
         throw new Error('Cart cost information is missing');
       }
 
       const { totalAmount } = JSON.parse(cartCost);
-      const amountInPaise = Math.round(parseFloat(totalAmount.amount) ); // Convert to paise
+      const amountInPaise = Math.round(parseFloat(totalAmount.amount));
 
       const response = await fetch('/api/razorpay/order', {
         method: 'POST',
@@ -161,6 +222,10 @@ const PaymentPage = () => {
         }),
       });
 
+      if (!response.ok) {
+        throw new Error('Failed to create Razorpay order');
+      }
+
       const { order } = await response.json();
 
       const options = {
@@ -172,23 +237,27 @@ const PaymentPage = () => {
         order_id: order.id,
         handler: async function (response: any) {
           try {
-            console.log('Payment successful, creating order...');
+            console.log('Payment response:', response);
             const orderResult = await createShopifyOrder(response);
-            
-            if (!orderResult) {
-              throw new Error('No order result received');
+            console.log('Order result:', orderResult);
+
+            if (!orderResult?.orderId) {
+              throw new Error('No order ID received');
             }
 
-            // Store the order ID
-            localStorage.setItem('lastOrderId', orderResult.shopifyOrderId.toString());
-
-            console.log('Order created successfully:', orderResult);
+            localStorage.setItem('lastOrderId', orderResult.orderId.toString());
             alert('Order placed successfully!');
             router.push('/Pages/OrderConfirmation');
           } catch (error: any) {
-            console.error('Order processing error:', error);
-            alert('Payment successful but order processing failed. Our team will contact you shortly. Reference ID: ' + response.razorpay_payment_id);
-            // You might want to store failed orders in a separate system for follow-up
+            console.error('Order processing error:', {
+              message: error.message,
+              stack: error.stack,
+              details: error
+            });
+            
+            alert(`Payment successful but order processing failed. Please contact support with Reference ID: ${response.razorpay_payment_id}`);
+            
+            // Log failed order with more details
             try {
               await fetch('/api/orders/failed', {
                 method: 'POST',
@@ -198,22 +267,23 @@ const PaymentPage = () => {
                 body: JSON.stringify({
                   paymentId: response.razorpay_payment_id,
                   error: error.message,
+                  errorStack: error.stack,
                   cartData: {
                     items: localStorage.getItem('cartItems'),
                     cost: localStorage.getItem('cartCost'),
-                    customerData: localStorage.getItem('customerData')
+                    customerData: localStorage.getItem('shippingDetails')
                   }
                 })
               });
-            } catch (e) {
-              console.error('Failed to log failed order:', e);
+            } catch (logError) {
+              console.error('Failed to log error:', logError);
             }
           }
         },
         prefill: {
-          name: customerData?.name || '',
-          email: customerData?.email || '',
-          contact: customerData?.phone || ''
+          name: customerData.name || '',
+          email: customerData.email || '',
+          contact: customerData.phone || ''
         },
         theme: {
           color: '#3399cc'
@@ -278,4 +348,4 @@ const PaymentPage = () => {
   );
 };
 
-export default PaymentPage; 
+export default PaymentPage;

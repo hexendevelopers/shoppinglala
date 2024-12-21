@@ -1,109 +1,125 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Razorpay from 'razorpay';
-
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID as string,
-  key_secret: process.env.RAZORPAY_KEY_SECRET as string,
-});
 
 interface LineItem {
-  variant_id: string;
+  variant_id: number;
   quantity: number;
+  title: string;
+  price: string;
+  requires_shipping: boolean;
+  taxable: boolean;
+  variant?: {
+    title?: string;
+    sku?: string;
+    image?: {
+      url?: string;
+    };
+  };
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { razorpayPaymentId, amount, currency, customerDetails, lineItems } = body;
+    if (!process.env.SHOPIFY_STORE_URL || !process.env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Missing Shopify configuration');
+    }
 
-    // Validate required fields
-    if (!razorpayPaymentId || !amount || !currency || !customerDetails || !lineItems) {
+    const body = await req.json();
+    console.log('Received request body:', body);
+
+    const { razorpayPaymentId, amount, customerDetails, lineItems } = body;
+
+    if (!razorpayPaymentId || !amount || !customerDetails || !lineItems) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
       );
     }
 
-    // Step 1: Verify Razorpay payment
-    const payment = await razorpay.payments.fetch(razorpayPaymentId);
+    const formattedAddress = {
+      first_name: customerDetails.firstName,
+      last_name: customerDetails.lastName,
+      address1: customerDetails.shippingDetails.address1,
+      address2: customerDetails.shippingDetails.address2 || '',
+      city: customerDetails.shippingDetails.city,
+      province: customerDetails.shippingDetails.province,
+      zip: customerDetails.shippingDetails.zip,
+      country: customerDetails.shippingDetails.country,
+      phone: customerDetails.shippingDetails.phone,
+    };
 
-    if (payment.status !== 'captured') {
-      return NextResponse.json(
-        { error: 'Payment not captured' },
-        { status: 400 }
-      );
-    }
-
-    // Step 2: Create a Shopify order
-    const shopifyOrderData = {
+    const orderData = {
       order: {
         email: customerDetails.email,
         financial_status: 'paid',
         line_items: lineItems.map((item: LineItem) => ({
-          variant_id: item.variant_id,
-          quantity: item.quantity
+          variant_id: parseInt(item.variant_id.toString()),
+          quantity: parseInt(item.quantity.toString()),
+          price: item.price,
+          requires_shipping: true,
+          taxable: true,
+          title: item.title,
+          properties: [
+            { name: "Image URL", value: item.variant?.image?.url || '' },
+            { name: "Variant Title", value: item.variant?.title || '' },
+            { name: "SKU", value: item.variant?.sku || '' }
+          ]
         })),
         customer: {
           first_name: customerDetails.firstName,
           last_name: customerDetails.lastName,
           email: customerDetails.email,
         },
-        billing_address: customerDetails.billingAddress,
-        shipping_address: customerDetails.shippingAddress,
+        shipping_address: formattedAddress,
+        billing_address: formattedAddress,
+        total_price: amount.toString(),
+        currency: "INR",
         transactions: [
           {
             kind: 'sale',
             status: 'success',
-            amount: amount,
+            amount: amount.toString(),
             gateway: 'Razorpay',
-            gateway_transaction_id: razorpayPaymentId
-          }
-        ]
-      }
+            payment_id: razorpayPaymentId,
+          },
+        ],
+      },
     };
 
-    console.log('Sending to Shopify:', shopifyOrderData); // For debugging
+    console.log('Sending to Shopify:', JSON.stringify(orderData, null, 2));
 
-    // Make request to Shopify API
     const shopifyResponse = await fetch(
-      `${process.env.SHOPIFY_STORE_URL}/admin/api/2023-10/orders.json`,
+      `${process.env.SHOPIFY_STORE_URL}/admin/api/2024-01/orders.json`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Shopify-Access-Token': process.env.SHOPIFY_ADMIN_ACCESS_TOKEN as string,
+          'X-Shopify-Access-Token': process.env.SHOPIFY_ADMIN_ACCESS_TOKEN,
         },
-        body: JSON.stringify(shopifyOrderData)
+        body: JSON.stringify(orderData),
       }
     );
 
+    const responseData = await shopifyResponse.json();
+    console.log('Shopify response:', responseData);
+
     if (!shopifyResponse.ok) {
-      const errorData = await shopifyResponse.json();
-      console.error('Shopify API Error:', errorData);
+      console.error('Shopify API Error:', responseData);
       return NextResponse.json(
-        { error: 'Failed to create Shopify order', details: errorData },
-        { status: 500 }
+        { error: 'Failed to create Shopify order', details: responseData },
+        { status: shopifyResponse.status }
       );
     }
 
-    const createdOrder = await shopifyResponse.json();
-
-    // Step 3: Return success response
     return NextResponse.json({
       success: true,
-      shopifyOrderId: createdOrder.order.id,
-      razorpayPaymentId: payment.id,
-      orderStatus: createdOrder.order.financial_status,
+      shopifyOrderId: responseData.order.id,
+      razorpayPaymentId,
+      orderStatus: responseData.order.financial_status,
     });
 
   } catch (error: any) {
     console.error('Error processing order:', error);
     return NextResponse.json(
-      { 
-        error: 'Internal Server Error', 
-        details: error.message 
-      },
+      { error: 'Internal Server Error', details: error.message },
       { status: 500 }
     );
   }

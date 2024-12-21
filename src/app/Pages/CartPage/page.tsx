@@ -712,15 +712,15 @@ const formatShopifyPrice = (price: string) => {
                             <div className="flex items-center space-x-2">
                               <button
                                 onClick={() => updateQuantity(productId, item.quantity - 1)}
-                                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors text-black"
+                                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
                                 disabled={item.quantity <= 1}
                               >
                                 -
                               </button>
-                              <span className="w-12 text-center font-medium text-black">{item.quantity}</span>
+                              <span className="w-12 text-center font-medium">{item.quantity}</span>
                               <button
                                 onClick={() => updateQuantity(productId, item.quantity + 1)}
-                                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors text-black"
+                                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
                               >
                                 +
                               </button>
@@ -800,7 +800,7 @@ const formatShopifyPrice = (price: string) => {
                             value={couponCode}
                             onChange={(e) => setCouponCode(e.target.value)}
                             placeholder="Enter discount code"
-                            className="flex-1 p-2 border rounded-md text-black placeholder-black"
+                            className="flex-1 p-2 border rounded-md"
                           />
                           <button
                             onClick={handleApplyCoupon}
